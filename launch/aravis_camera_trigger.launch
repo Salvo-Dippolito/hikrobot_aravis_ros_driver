@@ -1,0 +1,19 @@
+<launch>
+  <node 
+    pkg="aravis_camera_ros_driver"
+    type="aravis_camera_node"
+    name="aravis_camera_node"
+    respawn="true"
+    output="screen"
+  >
+    <rosparam command="load" file="$(find aravis_camera_ros_driver)/config/camera_params.yaml" />
+  </node>
+
+  <node 
+    pkg="aravis_camera_ros_driver"
+    type="snapshot_node"
+    name="snapshot_node"
+    respawn="false"
+    output="screen"
+  />  
+</launch>
