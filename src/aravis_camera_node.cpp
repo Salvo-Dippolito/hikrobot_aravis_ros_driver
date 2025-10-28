@@ -84,8 +84,10 @@ private:
     std::thread capture_thread_;
 
 public:
+    // AravisCameraNode()
+    //     : nh_("~"), it_(nh_) //this gives the node's topic a namespace
     AravisCameraNode()
-        : nh_("~"), it_(nh_)
+        : nh_(), it_(nh_)
     {
 
 
@@ -134,21 +136,43 @@ private:
 
         int fd = open(shared_file_.c_str(), O_RDWR);
         if (fd == -1) {
-            ROS_WARN("Failed to open shared memory file %s", shared_file_.c_str());
-            pointt = nullptr;
-            return;
+            // If the file doesn't exist, create it and size it
+            fd = open(shared_file_.c_str(), O_RDWR | O_CREAT, 0666);
+            if (fd == -1) {
+                ROS_WARN("Failed to open or create shared memory file %s: %s",
+                        shared_file_.c_str(), strerror(errno));
+                pointt = nullptr;
+                return;
+            }
+
+            if (ftruncate(fd, sizeof(time_stamp)) == -1) {
+                ROS_WARN("Failed to resize shared memory file %s: %s",
+                        shared_file_.c_str(), strerror(errno));
+                close(fd);
+                pointt = nullptr;
+                return;
+            }
+            ROS_INFO("Created new shared memory file: %s", shared_file_.c_str());
         }
         pointt = static_cast<time_stamp*>(mmap(nullptr, sizeof(time_stamp), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
-        close(fd);
+
         if (pointt == MAP_FAILED) {
-            ROS_WARN("Failed to mmap shared memory");
+            ROS_WARN("Failed to mmap shared memory file %s: %s",
+                    shared_file_.c_str(), strerror(errno));
             pointt = nullptr;
+        } else {
+            ROS_INFO("Mapped shared memory file: %s", shared_file_.c_str());
         }
+
+        close(fd);  // safe to close after mmap
     }
 
     void cleanup_shared_memory() {
-        if (pointt && pointt != MAP_FAILED)
+        if (pointt && pointt != MAP_FAILED) {
             munmap(pointt, sizeof(time_stamp));
+            pointt = nullptr;
+        }
+
         if (!shared_file_.empty()) {
             if (unlink(shared_file_.c_str()) == 0) {
                 ROS_INFO("Deleted shared memory file: %s", shared_file_.c_str());

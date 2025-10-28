@@ -1,4 +1,5 @@
 <launch>
+  <rosparam command="load" file="$(find aravis_camera_ros_driver)/config/camera_params.yaml" />
   <node 
     pkg="aravis_camera_ros_driver"
     type="aravis_camera_node"
@@ -6,7 +7,6 @@
     respawn="true"
     output="screen"
   >
-    <rosparam command="load" file="$(find aravis_camera_ros_driver)/config/camera_params.yaml" />
   </node>
 
   <node 

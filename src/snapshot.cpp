@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     // get image format param
     nh.param<std::string>("image_format", image_format, "jpg");
 
-    ros::Subscriber sub = nh.subscribe("/aravis_camera_node/left_camera/image", 1, save_frame_callback);
+    ros::Subscriber sub = nh.subscribe("/left_camera/image", 1, save_frame_callback);
     ros::ServiceServer srv = nh.advertiseService("save_frame", save_request);
 
     ROS_INFO("Ready to save a frame on service call /save_frame");

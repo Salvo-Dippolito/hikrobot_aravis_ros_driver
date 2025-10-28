@@ -16,7 +16,7 @@ AutoExposureTimeUpper: 20000
 AcquisitionTimeoutUs: 100000
 
 ImageScale: 1 # 1 0.5
-GainAuto: 2 # Gain Auto, 0 stands for Off, 1 stands for Once, 2 stands for Continues
+GainAuto: 2 # Gain Auto, 0 stands for Off, 1 stands for Once, 2 stands for Continuous
 Gain: 15 # min: 0   max: 17.0166
 Gamma: 0.7  # min: 0   max: 17.0166
 GammaSelector: 1 # 0 stands for user, 1 stands for sRGB
