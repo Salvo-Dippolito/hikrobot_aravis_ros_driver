@@ -4,13 +4,12 @@
 CameraName: "Hikrobot-00DA4157188"
 TopicName: "left_camera/image"
 SharedFile: "/home/percro_drone/timeshare"
-# PixelFormat: "BayerRG8"
 TriggerEnable: 1 # 0 stands for Off, 1 stands for On
 
 
 # Camera exposure and gain parameters
-ExposureAutoMode: 2 # 0 stands for Off, 1 stands for Once, 2 stands for Continuous
-ExposureTime: 5000 # us
+ExposureAutoMode: 0 # 0 stands for Off, 1 stands for Once, 2 stands for Continuous
+ExposureTime: 38400 # us
 AutoExposureTimeLower: 100
 AutoExposureTimeUpper: 20000
 AcquisitionTimeoutUs: 100000
@@ -22,7 +21,8 @@ Gamma: 0.7  # min: 0   max: 17.0166
 GammaSelector: 1 # 0 stands for user, 1 stands for sRGB
 # GammaEnable: 1
 
-PixelFormat: 0 # 0: RGB8, 1: BayerRG8, 2: BayerRG12Packed, 3: BayerGB12Packed
+# the camera sensor's pixel format, all frames are published as rgb8 anyway
+PixelFormat:  # 0: RGB8, 1: BayerRG8, 2: BayerRG12Packed, 3: BayerGB12Packed
 
-
+UseSharedTimestamp: false # whether it should take the lidar's timestamp or not
 
