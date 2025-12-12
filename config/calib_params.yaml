@@ -1,0 +1,8 @@
+Rows: 5
+Cols: 7
+SquareSize: 0.046
+MinCoverage: 0.2
+MaxBlur: 150.0
+RequireFullCornerset: true
+SaveDir: /home/user/calib_selected
+ImageTopic: /left_camera/image

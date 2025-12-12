@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(aravis_camera_ros_driver)
+add_compile_options(-std=c++17)
+
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -150,6 +152,12 @@ target_link_libraries(aravis_camera_node
 
 add_executable(snapshot_node src/snapshot.cpp)
 target_link_libraries(snapshot_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(calib_interactive_collector_node src/collect_calib_samples.cpp)
+target_link_libraries(calib_interactive_collector_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
 )
