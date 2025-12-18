@@ -1,0 +1,3 @@
+<launch>
+    <node name="square_size_checker" pkg="aravis_camera_ros_driver" type="test_undistort.py" output="screen"/>
+</launch>
