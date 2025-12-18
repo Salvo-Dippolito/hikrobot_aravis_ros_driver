@@ -92,12 +92,18 @@ private:
     std::string camera_name_;
     std::string topic_name_, shared_file_;
     int AcquisitionTimeoutUs, AutoExposureTimeLower, AutoExposureTimeUpper, ExposureTime, ExposureAutoMode,
-        GainAuto, GammaSelector, TriggerEnable, pixel_format_param_;
+        GainAuto, GammaSelector, Sharpness, TriggerEnable, pixel_format_param_;
     float Gain, Gamma;
     double ImageScale;
     bool TriggerEnable_bool;
     bool UseSharedTimestamp;
 
+    bool SharpnessEnable;
+    bool SharpnessAuto;
+
+    std::string DigitalNoiseReductionMode;
+    bool TemporalNoiseReduction;
+    bool AirspaceNoiseReduction;
 
     ArvCamera* camera_ = nullptr;
     ArvStream* stream_ = nullptr;
@@ -127,6 +133,14 @@ public:
         nh_.param<int>("TriggerEnable", TriggerEnable, 1);
         nh_.param<int>("PixelFormat", pixel_format_param_, 0); // 0: RGB8, 1: BayerRG8, 2: BayerRG12Packed, 3: BayerGB12Packed
         nh_.param<bool>("UseSharedTimestamp", UseSharedTimestamp, false);
+
+        nh_.param<bool>("SharpnessEnable", SharpnessEnable, false);
+        nh_.param<bool>("SharpnessAuto", SharpnessAuto, false);
+        nh_.param<int>("Sharpness", Sharpness, 0);
+
+        nh_.param<std::string>("DigitalNoiseReductionMode", DigitalNoiseReductionMode, "Off");
+        nh_.param<bool>("TemporalNoiseReduction", TemporalNoiseReduction, false);
+        nh_.param<bool>("AirspaceNoiseReduction", AirspaceNoiseReduction, false);
 
         pub_ = it_.advertise(topic_name_, 1);
         ROS_INFO("Publishing images to topic: %s", topic_name_.c_str());
@@ -371,6 +385,46 @@ private:
             arv_device_set_float_feature_value(device_, "Gamma", Gamma);
         }
 
+        // Sharpness
+        if (arv_device_get_feature(device_, "SharpnessEnable")) {
+            arv_device_get_boolean_feature_value(device_, "SharpnessEnable");
+            arv_device_set_boolean_feature_value(device_, "SharpnessEnable", SharpnessEnable);
+            ROS_INFO("Camera SharpnessEnable = %d", SharpnessEnable);
+            
+            if (SharpnessEnable &&
+                arv_device_get_feature(device_, "SharpnessAuto")) {
+                arv_device_set_boolean_feature_value(device_, "SharpnessAuto", SharpnessAuto);
+                ROS_INFO("Setting SharpnessAuto=%d", SharpnessAuto);
+
+                if (!SharpnessAuto &&
+                    arv_device_get_feature(device_, "Sharpness")) {
+                    arv_device_set_float_feature_value(device_, "Sharpness", Sharpness);
+                    ROS_INFO("Applied Sharpness settings: Enable=%d Auto=%d Value=%d", SharpnessEnable, SharpnessAuto, Sharpness);
+                }
+            }
+        }   
+
+        // Digital Noise Reduction
+        if (arv_device_get_feature(device_, "DigitalNoiseReductionMode")) {
+            arv_device_set_string_feature_value(
+                device_, "DigitalNoiseReductionMode",
+                DigitalNoiseReductionMode.c_str());
+        }
+
+        if (arv_device_get_feature(device_, "TemporalNoiseReduction")) {
+            arv_device_set_boolean_feature_value(
+                device_, "TemporalNoiseReduction",
+                TemporalNoiseReduction);
+        }
+
+        if (arv_device_get_feature(device_, "AirspaceNoiseReduction")) {
+            arv_device_set_boolean_feature_value(
+                device_, "AirspaceNoiseReduction",
+                AirspaceNoiseReduction);
+        }
+
+        
+        
         // Trigger capabilities info
         guint n_sources = 0;
         const char **sources = arv_camera_get_available_trigger_sources(camera_, &n_sources);

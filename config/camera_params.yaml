@@ -9,20 +9,29 @@ TriggerEnable: 1 # 0 stands for Off, 1 stands for On
 
 # Camera exposure and gain parameters
 ExposureAutoMode: 0 # 0 stands for Off, 1 stands for Once, 2 stands for Continuous
-ExposureTime: 38400 # us
+ExposureTime: 20000 # us
 AutoExposureTimeLower: 100
-AutoExposureTimeUpper: 20000
+AutoExposureTimeUpper: 50000
 AcquisitionTimeoutUs: 100000
 
 ImageScale: 1 # 1 0.5
-GainAuto: 2 # Gain Auto, 0 stands for Off, 1 stands for Once, 2 stands for Continuous
-Gain: 15 # min: 0   max: 17.0166
-Gamma: 0.7  # min: 0   max: 17.0166
+GainAuto: 0 # Gain Auto, 0 stands for Off, 1 stands for Once, 2 stands for Continuous
+Gain: 15 # min:0 max:15.0062
+Gamma: 0.7  # default 0.69
 GammaSelector: 1 # 0 stands for user, 1 stands for sRGB
-# GammaEnable: 1
+# GammaEnable: 1 #true by default
+
+SharpnessEnable: false
+SharpnessAuto: false
+Sharpness: 0 # min: 0   max: 100
+
+DigitalNoiseReductionMode: Off # Off, Low, Medium, High
+TemporalNoiseReduction: false # none of these are available for Hikrobot cameras
+AirspaceNoiseReduction: false
+
 
 # the camera sensor's pixel format, all frames are published as rgb8 anyway
-PixelFormat:  # 0: RGB8, 1: BayerRG8, 2: BayerRG12Packed, 3: BayerGB12Packed
+PixelFormat: 0 # 0: RGB8, 1: BayerRG8, 2: BayerRG12Packed, 3: BayerGB12Packed
 
 UseSharedTimestamp: false # whether it should take the lidar's timestamp or not
 
