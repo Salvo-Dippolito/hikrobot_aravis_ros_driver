@@ -1,8 +1,10 @@
-Rows: 5
-Cols: 7
-SquareSize: 0.046
+Rows: 13
+Cols: 19
+SquareSize: 0.02
 MinCoverage: 0.2
 MaxBlur: 150.0
 RequireFullCornerset: true
-SaveDir: /home/user/calib_selected
+SaveDir: /home/percro_drone/ros_ws/src/aravis_camera_ros_driver/calib_images
 ImageTopic: /left_camera/image
+StartRegion: 0
+ReadFromDataset: true
