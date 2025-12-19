@@ -1,6 +1,7 @@
 // aravis_camera_node.cpp
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <signal.h>
@@ -23,9 +24,12 @@ struct time_stamp {
 
 struct CameraData {
     image_transport::Publisher pub;
+    ros::Publisher camera_info_pub;
+    sensor_msgs::CameraInfo camera_info_msg;
     int pixel_format;
     double image_scale;
-    bool use_shared_timestamp; 
+    bool use_shared_timestamp;
+    bool publish_camera_info;
 };
 
 // static volatile bool exit_flag = false;
@@ -105,6 +109,16 @@ private:
     bool TemporalNoiseReduction;
     bool AirspaceNoiseReduction;
 
+    // CameraInfo parameters
+    bool publish_camera_info_;
+    std::string camera_info_topic_;
+    std::string camera_frame_id_;
+    int image_width_, image_height_;
+    double fx_, fy_, cx_, cy_;
+    double k1_, k2_, p1_, p2_, k3_;
+    ros::Publisher camera_info_pub_;
+    sensor_msgs::CameraInfo camera_info_msg_;
+
     ArvCamera* camera_ = nullptr;
     ArvStream* stream_ = nullptr;
     ArvDevice* device_ = nullptr;
@@ -142,7 +156,30 @@ public:
         nh_.param<bool>("TemporalNoiseReduction", TemporalNoiseReduction, false);
         nh_.param<bool>("AirspaceNoiseReduction", AirspaceNoiseReduction, false);
 
+        // CameraInfo parameters
+        nh_.param<bool>("publish_camera_info", publish_camera_info_, false);
+        nh_.param<std::string>("camera_info_topic", camera_info_topic_, "left_camera/camera_info");
+        nh_.param<std::string>("camera_frame_id", camera_frame_id_, "camera");
+        nh_.param<int>("image_width", image_width_, 1280);
+        nh_.param<int>("image_height", image_height_, 1024);
+        nh_.param<double>("fx", fx_, 1292.06779);
+        nh_.param<double>("fy", fy_, 1295.77329);
+        nh_.param<double>("cx", cx_, 656.907035);
+        nh_.param<double>("cy", cy_, 508.768017);
+        nh_.param<double>("k1", k1_, -0.07804858);
+        nh_.param<double>("k2", k2_, 0.13329546);
+        nh_.param<double>("p1", p1_, -0.00138415);
+        nh_.param<double>("p2", p2_, -0.00035261);
+        nh_.param<double>("k3", k3_, 0.0);
+
         pub_ = it_.advertise(topic_name_, 1);
+
+        // Setup CameraInfo publisher and message
+        if (publish_camera_info_) {
+            camera_info_pub_ = nh_.advertise<sensor_msgs::CameraInfo>(camera_info_topic_, 1);
+            setup_camera_info_msg();
+            ROS_INFO("Publishing CameraInfo to topic: %s", camera_info_topic_.c_str());
+        }
         ROS_INFO("Publishing images to topic: %s", topic_name_.c_str());
 
         if (UseSharedTimestamp) {setup_shared_memory();} else {ROS_INFO("Shared timestamp disabled, using Ros::Time.now()");}
@@ -156,6 +193,45 @@ public:
     }
 
 private:
+    void setup_camera_info_msg() {
+        camera_info_msg_.header.frame_id = camera_frame_id_;
+        camera_info_msg_.width = image_width_;
+        camera_info_msg_.height = image_height_;
+        camera_info_msg_.distortion_model = "plumb_bob";
+        
+        // Distortion coefficients: [k1, k2, p1, p2, k3]
+        camera_info_msg_.D = {k1_, k2_, p1_, p2_, k3_};
+        
+        // Intrinsic camera matrix K (3x3 row-major)
+        camera_info_msg_.K = {
+            fx_, 0.0, cx_,
+            0.0, fy_, cy_,
+            0.0, 0.0, 1.0
+        };
+        
+        // Rectification matrix R (identity for monocular)
+        camera_info_msg_.R = {
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        };
+        
+        // Projection matrix P (3x4)
+        camera_info_msg_.P = {
+            fx_, 0.0, cx_, 0.0,
+            0.0, fy_, cy_, 0.0,
+            0.0, 0.0, 1.0, 0.0
+        };
+        
+        camera_info_msg_.binning_x = 0;
+        camera_info_msg_.binning_y = 0;
+        camera_info_msg_.roi.x_offset = 0;
+        camera_info_msg_.roi.y_offset = 0;
+        camera_info_msg_.roi.height = 0;
+        camera_info_msg_.roi.width = 0;
+        camera_info_msg_.roi.do_rectify = false;
+    }
+
     void setup_shared_memory() {
         int fd = open(shared_file_.c_str(), O_RDWR);
         if (fd == -1) {
@@ -285,6 +361,12 @@ private:
             msg->header.frame_id = "camera";
     
             data->pub.publish(msg);
+
+            // Publish CameraInfo with matching timestamp
+            if (data->publish_camera_info) {
+                data->camera_info_msg.header.stamp = msg->header.stamp;
+                data->camera_info_pub.publish(data->camera_info_msg);
+            }
         }
     
         arv_stream_push_buffer(stream, buffer);
@@ -471,7 +553,15 @@ private:
         }
 
         // Prepare camera data and attach to stream
-        cam_data_.reset(new CameraData{pub_, pixel_format_param_, ImageScale, UseSharedTimestamp});
+        cam_data_.reset(new CameraData{
+            pub_,
+            camera_info_pub_,
+            camera_info_msg_,
+            pixel_format_param_,
+            ImageScale,
+            UseSharedTimestamp,
+            publish_camera_info_
+        });
         // Connect callback
         g_signal_connect(stream_, "new-buffer", G_CALLBACK(new_buffer_cb), cam_data_.get());
         arv_stream_set_emit_signals(stream_, true);
