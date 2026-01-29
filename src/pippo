@@ -1,0 +1,374 @@
+#include <ros/ros.h>
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/Image.h>
+
+#include <opencv2/opencv.hpp>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/imgproc.hpp>
+
+#include <string>
+#include <vector>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <filesystem>
+#include <ros/package.h>
+
+namespace fs = std::filesystem;
+
+/* ========================= ENUMS ========================= */
+
+enum DistanceClass { FAR = 0, MID = 1, NEAR = 2, DIST_COUNT };
+enum TiltClass     { LOW_TILT = 0, MID_TILT = 1, HIGH_TILT = 2, TILT_COUNT };
+
+/* ========================= STRUCTS ========================= */
+
+struct PoseBucket
+{
+    int count[DIST_COUNT][TILT_COUNT] = {{0}};
+};
+
+struct Quadrant
+{
+    cv::Rect rect;
+};
+
+/* ========================= CLASS ========================= */
+
+class CalibCollector
+{
+public:
+    CalibCollector(ros::NodeHandle& nh)
+        : nh_(nh)
+    {
+        loadParams();
+        setupIO();
+        initYAML();
+    }
+
+    ~CalibCollector()
+    {
+        fs_yaml_ << "]";   // close images
+        fs_yaml_.release();
+    }
+
+    void spin()
+    {
+        ros::Rate rate(30);
+        while (ros::ok())
+        {
+            ros::spinOnce();
+            if (!has_image_) { rate.sleep(); continue; }
+
+            if (quadrants_.empty())
+                initQuadrants(current_image_.cols, current_image_.rows);
+
+            processAndDisplay();
+
+            int key = cv::waitKey(1);
+            if (key == 'q') break;
+
+            if ((key == ' ' || mouse_clicked_) && last_frame_valid_)
+                saveImage();
+
+            mouse_clicked_ = false;
+            rate.sleep();
+        }
+    }
+
+private:
+    /* ========================= ROS ========================= */
+
+    ros::NodeHandle nh_;
+    ros::Subscriber sub_;
+
+    /* ========================= IMAGE ========================= */
+
+    cv::Mat current_image_;
+    bool has_image_ = false;
+
+    /* ========================= BOARD ========================= */
+
+    int rows_, cols_;
+    double square_size_;
+    cv::Size checkerboard_;
+
+    /* ========================= QUALITY ========================= */
+
+    double min_coverage_;
+    double min_sharpness_;
+    bool require_full_corners_;
+
+    double last_sharpness_ = 0.0;
+    double last_coverage_  = 0.0;
+    bool   last_frame_valid_ = false;
+    std::vector<cv::Point2f> last_corners_;
+
+    /* ========================= UI ========================= */
+
+    cv::Rect save_button_{20, 100, 220, 50};
+    bool mouse_hover_ = false;
+    bool mouse_pressed_ = false;
+    bool mouse_clicked_ = false;
+
+    /* ========================= STORAGE ========================= */
+
+    std::string save_dir_;
+    cv::FileStorage fs_yaml_;
+    int saved_count_ = 0;
+
+    /* ========================= POSE LOGIC ========================= */
+
+    std::vector<Quadrant> quadrants_;
+    std::vector<PoseBucket> pose_buckets_{4};
+
+    int current_quadrant_ = 0;
+    bool global_pass_ = false;
+
+    int target_per_distance_[DIST_COUNT] = {3, 3, 3};
+    int target_per_tilt_[TILT_COUNT]     = {1, 1, 1};
+
+    /* ========================= INIT ========================= */
+
+    void loadParams()
+    {
+        nh_.param("Rows", rows_, 5);
+        nh_.param("Cols", cols_, 7);
+        nh_.param("SquareSize", square_size_, 0.025);
+        nh_.param("MinCoverage", min_coverage_, 0.2);
+        nh_.param("MinSharpness", min_sharpness_, 150.0);
+        nh_.param("RequireFullCorners", require_full_corners_, true);
+
+        std::string pkg = ros::package::getPath("aravis_camera_ros_driver");
+        nh_.param("SaveDir", save_dir_, pkg + "/calib_images");
+
+        checkerboard_ = cv::Size(cols_, rows_);
+    }
+
+    void setupIO()
+    {
+        fs::create_directories(save_dir_);
+
+        sub_ = nh_.subscribe("/left_camera/image", 1,
+                             &CalibCollector::imageCallback, this);
+
+        cv::namedWindow("calibration_selector", cv::WINDOW_NORMAL);
+        cv::setMouseCallback("calibration_selector", mouseCallback, this);
+    }
+
+    void initYAML()
+    {
+        fs_yaml_.open(save_dir_ + "/corners.yaml", cv::FileStorage::WRITE);
+
+        fs_yaml_ << "board" << "{";
+        fs_yaml_ << "rows" << rows_;
+        fs_yaml_ << "cols" << cols_;
+        fs_yaml_ << "square_size" << square_size_;
+        fs_yaml_ << "}";
+
+        fs_yaml_ << "images" << "[";
+    }
+
+    /* ========================= CALLBACKS ========================= */
+
+    void imageCallback(const sensor_msgs::ImageConstPtr& msg)
+    {
+        auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+        current_image_ = cv_ptr->image;
+        has_image_ = true;
+    }
+
+    static void mouseCallback(int event, int x, int y, int, void* userdata)
+    {
+        auto* self = static_cast<CalibCollector*>(userdata);
+        cv::Point p(x,y);
+        self->mouse_hover_ = self->save_button_.contains(p);
+
+        if (event == cv::EVENT_LBUTTONDOWN && self->mouse_hover_)
+            self->mouse_pressed_ = true;
+
+        if (event == cv::EVENT_LBUTTONUP)
+        {
+            if (self->mouse_pressed_ && self->mouse_hover_)
+                self->mouse_clicked_ = true;
+            self->mouse_pressed_ = false;
+        }
+    }
+
+    /* ========================= METRICS ========================= */
+
+    double computeSharpness(const cv::Mat& gray)
+    {
+        cv::Mat lap;
+        cv::Laplacian(gray, lap, CV_64F);
+        cv::Scalar mu, sigma;
+        cv::meanStdDev(lap, mu, sigma);
+        return sigma[0] * sigma[0];
+    }
+
+    double computeCoverage(const std::vector<cv::Point2f>& c, int w, int h)
+    {
+        cv::Rect bb = cv::boundingRect(c);
+        return std::min((double)bb.width / w, (double)bb.height / h);
+    }
+
+    double computeTiltAnisotropy(const std::vector<cv::Point2f>& c)
+    {
+        cv::Rect bb = cv::boundingRect(c);
+        return std::abs(1.0 - (double)bb.width / bb.height);
+    }
+
+    /* ========================= CLASSIFIERS ========================= */
+
+    DistanceClass classifyDistance(const std::vector<cv::Point2f>& c)
+    {
+        double area = cv::boundingRect(c).area();
+        if (area < 0.10 * current_image_.total()) return FAR;
+        if (area < 0.25 * current_image_.total()) return MID;
+        return NEAR;
+    }
+
+    TiltClass classifyTilt(double a)
+    {
+        if (a < 0.1) return LOW_TILT;
+        if (a < 0.3) return MID_TILT;
+        return HIGH_TILT;
+    }
+
+    /* ========================= CORE ========================= */
+
+    void processAndDisplay()
+    {
+        cv::Mat img = current_image_.clone();
+        cv::Mat gray;
+        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+
+        std::vector<cv::Point2f> corners;
+        bool found = cv::findChessboardCornersSB(gray, checkerboard_, corners);
+
+        last_frame_valid_ = false;
+
+        if (found)
+        {
+            double sharp = computeSharpness(gray);
+            double cov   = computeCoverage(corners, img.cols, img.rows);
+            double tiltA = computeTiltAnisotropy(corners);
+
+            DistanceClass d = classifyDistance(corners);
+            TiltClass     t = classifyTilt(tiltA);
+
+            bool pose_needed = global_pass_ ||
+                pose_buckets_[current_quadrant_].count[d][t] <
+                target_per_tilt_[t];
+
+            last_frame_valid_ =
+                sharp > min_sharpness_ &&
+                cov   > min_coverage_ &&
+                pose_needed;
+
+            last_corners_ = corners;
+            last_sharpness_ = sharp;
+            last_coverage_  = cov;
+
+            cv::drawChessboardCorners(img, checkerboard_, corners, true);
+        }
+
+        drawUI(img);
+        cv::imshow("calibration_selector", img);
+    }
+
+    void saveImage()
+    {
+        std::string name = generateFilename();
+        cv::imwrite(name, current_image_);
+
+        DistanceClass d = classifyDistance(last_corners_);
+        TiltClass t = classifyTilt(computeTiltAnisotropy(last_corners_));
+
+        pose_buckets_[current_quadrant_].count[d][t]++;
+        saved_count_++;
+
+        fs_yaml_ << "{";
+        fs_yaml_ << "file" << fs::path(name).filename().string();
+        fs_yaml_ << "quadrant" << current_quadrant_;
+        fs_yaml_ << "distance" << d;
+        fs_yaml_ << "tilt" << t;
+        fs_yaml_ << "sharpness" << last_sharpness_;
+        fs_yaml_ << "coverage" << last_coverage_;
+        fs_yaml_ << "corners" << "[";
+        for (auto& p : last_corners_)
+            fs_yaml_ << "[" << p.x << p.y << "]";
+        fs_yaml_ << "]";
+        fs_yaml_ << "}";
+
+        advanceState();
+    }
+
+    void advanceState()
+    {
+        bool done = true;
+        for (int d=0; d<DIST_COUNT; ++d)
+            for (int t=0; t<TILT_COUNT; ++t)
+                if (pose_buckets_[current_quadrant_].count[d][t] <
+                    target_per_tilt_[t])
+                    done = false;
+
+        if (done)
+        {
+            current_quadrant_++;
+            if (current_quadrant_ >= 4)
+                global_pass_ = true;
+        }
+    }
+
+    /* ========================= HELPERS ========================= */
+
+    void initQuadrants(int w, int h)
+    {
+        quadrants_.clear();
+        quadrants_.push_back({cv::Rect(0,0,w/2,h/2)});
+        quadrants_.push_back({cv::Rect(w/2,0,w/2,h/2)});
+        quadrants_.push_back({cv::Rect(0,h/2,w/2,h/2)});
+        quadrants_.push_back({cv::Rect(w/2,h/2,w/2,h/2)});
+    }
+
+    std::string generateFilename()
+    {
+        std::ostringstream ss;
+        auto t = std::time(nullptr);
+        ss << save_dir_ << "/calib_" << t << ".png";
+        return ss.str();
+    }
+
+    void drawUI(cv::Mat& img)
+    {
+        cv::rectangle(img, save_button_,
+                      mouse_hover_ ? cv::Scalar(80,80,80) : cv::Scalar(40,40,40),
+                      cv::FILLED);
+
+        cv::putText(img, "SAVE IMAGE",
+                    save_button_.tl() + cv::Point(15,35),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                    cv::Scalar(255,255,255), 2);
+
+        cv::putText(img,
+                    global_pass_ ? "GLOBAL PASS" :
+                    "Quadrant " + std::to_string(current_quadrant_+1),
+                    {20,30},
+                    cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                    cv::Scalar(0,255,255), 2);
+    }
+};
+
+/* ========================= MAIN ========================= */
+
+int main(int argc, char** argv)
+{
+    ros::init(argc, argv, "calib_interactive_collector_node");
+    ros::NodeHandle nh("~");
+
+    CalibCollector node(nh);
+    node.spin();
+
+    return 0;
+}

@@ -17,14 +17,14 @@
     output="screen"
   /> 
 
-  <node 
+  <!-- <node 
     pkg="aravis_camera_ros_driver"
     type="calib_interactive_collector_node"
     name="calib_interactive_collector_node"
     respawn="false"
     output="screen">
     <rosparam file="$(find aravis_camera_ros_driver)/config/calib_params.yaml" command="load"/>
-  </node>
+  </node> -->
 
 
 </launch>
