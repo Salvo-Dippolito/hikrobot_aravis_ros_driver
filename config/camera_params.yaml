@@ -56,3 +56,4 @@ p1: -0.00138415
 p2: -0.00035261
 k3: 0.0
 
+publish_undistorted: false # whether to publish directly the undistorted image 

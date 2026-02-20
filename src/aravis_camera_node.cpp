@@ -30,6 +30,12 @@ struct CameraData {
     double image_scale;
     bool use_shared_timestamp;
     bool publish_camera_info;
+    bool publish_undistorted;
+
+    // UNDISTORTION
+    cv::Mat map1;
+    cv::Mat map2;
+    bool undistort_ready = false;
 };
 
 // static volatile bool exit_flag = false;
@@ -108,6 +114,7 @@ private:
     std::string DigitalNoiseReductionMode;
     bool TemporalNoiseReduction;
     bool AirspaceNoiseReduction;
+    bool publish_undistorted_;
 
     // CameraInfo parameters
     bool publish_camera_info_;
@@ -155,6 +162,7 @@ public:
         nh_.param<std::string>("DigitalNoiseReductionMode", DigitalNoiseReductionMode, "Off");
         nh_.param<bool>("TemporalNoiseReduction", TemporalNoiseReduction, false);
         nh_.param<bool>("AirspaceNoiseReduction", AirspaceNoiseReduction, false);
+        nh_.param<bool>("publish_undistorted", publish_undistorted_, false);
 
         // CameraInfo parameters
         nh_.param<bool>("publish_camera_info", publish_camera_info_, false);
@@ -184,6 +192,12 @@ public:
 
         if (UseSharedTimestamp) {setup_shared_memory();} else {ROS_INFO("Shared timestamp disabled, using Ros::Time.now()");}
         // SetupSignalHandler();
+
+        if (publish_undistorted_) {
+            ROS_INFO("Publishing undistorted images only.");
+        } else {
+            ROS_INFO("Publishing raw images (legacy behavior) in addition to CameraInfo if enabled.");
+        }
         start_camera();
     }
 
@@ -230,6 +244,10 @@ private:
         camera_info_msg_.roi.height = 0;
         camera_info_msg_.roi.width = 0;
         camera_info_msg_.roi.do_rectify = false;
+
+        cv::Mat camera_matrix_, dist_coeffs_, new_camera_matrix_;
+        cv::Mat map1_, map2_;
+        bool undistort_ready_ = false;
     }
 
     void setup_shared_memory() {
@@ -282,6 +300,22 @@ private:
         }
     }
 
+    void setup_undistort_maps() {
+        cv::Mat camera_matrix = (cv::Mat_<double>(3,3) << fx_, 0, cx_, 0, fy_, cy_, 0, 0, 1);
+        cv::Mat dist_coeffs = (cv::Mat_<double>(1,5) << k1_, k2_, p1_, p2_, k3_);
+        cv::Mat new_camera_matrix = cv::getOptimalNewCameraMatrix(
+            camera_matrix, dist_coeffs, cv::Size(image_width_, image_height_), 1.0
+        );
+
+        cv::initUndistortRectifyMap(camera_matrix, dist_coeffs, cv::Mat(),
+                                    new_camera_matrix,
+                                    cv::Size(image_width_, image_height_),
+                                    CV_16SC2,
+                                    cam_data_->map1,
+                                    cam_data_->map2);
+
+        cam_data_->undistort_ready = true;
+    }
 
     static void new_buffer_cb(ArvStream *stream, CameraData *data) {
         ArvBuffer *buffer = arv_stream_try_pop_buffer(stream);
@@ -347,7 +381,14 @@ private:
     
             if (data->image_scale != 1.0)
                 cv::resize(rgb, rgb, cv::Size(), data->image_scale, data->image_scale);
-    
+
+            // Undistort only if parameter enabled
+            if (data->publish_undistorted && data->undistort_ready) {
+                cv::Mat undistorted;
+                cv::remap(rgb, undistorted, data->map1, data->map2, cv::INTER_LINEAR);
+                rgb = undistorted;
+            }
+
             sensor_msgs::ImagePtr msg =
                 cv_bridge::CvImage(std_msgs::Header(), "rgb8", rgb).toImageMsg();
     
@@ -360,13 +401,14 @@ private:
 
             msg->header.frame_id = "camera";
     
-            data->pub.publish(msg);
 
             // Publish CameraInfo with matching timestamp
             if (data->publish_camera_info) {
                 data->camera_info_msg.header.stamp = msg->header.stamp;
                 data->camera_info_pub.publish(data->camera_info_msg);
             }
+
+            data->pub.publish(msg);
         }
     
         arv_stream_push_buffer(stream, buffer);
@@ -560,7 +602,8 @@ private:
             pixel_format_param_,
             ImageScale,
             UseSharedTimestamp,
-            publish_camera_info_
+            publish_camera_info_,
+            publish_undistorted_
         });
         // Connect callback
         g_signal_connect(stream_, "new-buffer", G_CALLBACK(new_buffer_cb), cam_data_.get());
