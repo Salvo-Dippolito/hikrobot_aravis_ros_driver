@@ -8,6 +8,9 @@ So far only external trigger  mode has been implemented in the driver to work wi
 
 The package also presents scripts to collect images for intrinsic camera calibration and scripts to calibrate camera intrinsics from the collected calibration images.
 
+In the ROS2 branch of this repository there is a bare bones version of this package that is updated to work with ROS2.
+
+
 ## Features
 
 - **Camera Node**: Launch and manage camera streams using Aravis and GenICam.
